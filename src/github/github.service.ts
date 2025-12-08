@@ -186,6 +186,7 @@ export class GitHubService {
           decision,
           analysisResult,
           prEntity,
+          pr.user.login,
         );
         this.logger.log('✅ Step 6 complete: Review submitted to GitHub');
       } catch (githubError) {
@@ -219,14 +220,31 @@ export class GitHubService {
     decision: ReviewDecision,
     analysisResult: any,
     prEntity: PullRequestEntity,
+    prAuthor: string,
   ) {
     try {
       this.logger.log(
         `Attempting to submit review for ${owner}/${repo}#${prNumber}`,
       );
 
-      const event =
-        decision === ReviewDecision.APPROVED ? 'APPROVE' : 'REQUEST_CHANGES';
+      // 현재 인증된 사용자 확인
+      const { data: currentUser } = await this.octokit.users.getAuthenticated();
+      const isOwnPR =
+        currentUser.login.toLowerCase() === prAuthor.toLowerCase();
+
+      let event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+
+      if (isOwnPR) {
+        // 자기 자신의 PR인 경우 COMMENT만 가능
+        event = 'COMMENT';
+        this.logger.warn(
+          `⚠️  Cannot approve own PR. Using COMMENT instead for ${prAuthor}'s PR`,
+        );
+      } else {
+        // 다른 사람의 PR인 경우 정상적으로 APPROVE/REQUEST_CHANGES
+        event =
+          decision === ReviewDecision.APPROVED ? 'APPROVE' : 'REQUEST_CHANGES';
+      }
 
       const comments = analysisResult.violations
         .filter((v: any) => v.lineNumber > 0)
@@ -242,13 +260,19 @@ export class GitHubService {
         `Summary length: ${analysisResult.summary?.length || 0} chars`,
       );
 
+      // 자기 자신의 PR인 경우 메시지 수정
+      let reviewBody = analysisResult.summary;
+      if (isOwnPR && decision === ReviewDecision.APPROVED) {
+        reviewBody = `## 💬 자동 코드 리뷰 결과 (Comment)\n\n${analysisResult.summary}\n\n⚠️ _Note: 자기 자신의 PR이므로 승인 대신 코멘트로 남깁니다. 다른 리뷰어의 승인이 필요합니다._`;
+      }
+
       // GitHub API로 리뷰 생성
       const { data: review } = await this.octokit.pulls.createReview({
         owner,
         repo,
         pull_number: prNumber,
         event,
-        body: analysisResult.summary,
+        body: reviewBody,
         comments: comments.length > 0 ? comments : undefined,
       });
 
