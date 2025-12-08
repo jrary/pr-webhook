@@ -91,11 +91,11 @@ sudo apt-get update
 sudo apt-get upgrade -y
 ```
 
-### 3.2 Node.js 18 설치
+### 3.2 Node.js 24 설치
 
 ```bash
 # NodeSource 저장소 추가
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 
 # Node.js 설치
 sudo apt-get install -y nodejs
@@ -247,7 +247,7 @@ services:
     image: mariadb:latest
     container_name: rag-chat-mariadb
     ports:
-      - "3306:3306"
+      - '3306:3306'
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
       MYSQL_DATABASE: ${DB_DATABASE}
@@ -255,7 +255,7 @@ services:
       - mariadb_data:/var/lib/mysql
     restart: always
     healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -278,6 +278,7 @@ docker-compose logs -f
 ```
 
 **예상 출력**:
+
 ```
 CONTAINER ID   IMAGE              STATUS          PORTS
 abc123...      qdrant/qdrant      Up 10 seconds   0.0.0.0:6333->6333/tcp
@@ -295,6 +296,7 @@ npm run migration:run
 ```
 
 **예상 출력**:
+
 ```
 Migration CreateUserTable1763992905925 has been executed successfully.
 Migration AddRoleToUser1763996237000 has been executed successfully.
@@ -362,6 +364,7 @@ gcloud compute instances describe pr-webhook-vm \
 ```
 
 또는 GCP 콘솔에서:
+
 - Compute Engine → VM 인스턴스 → 외부 IP 확인
 
 ### 6.2 포트 3000 방화벽 규칙 확인
@@ -470,6 +473,7 @@ TTL: 3600
 ```
 
 예시:
+
 - `webhook.yourdomain.com` → `34.64.123.456`
 
 ### 7.3 SSL 인증서 설정 (Let's Encrypt)
@@ -808,7 +812,7 @@ proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=my_cache:10m inactive=60m
 
 server {
     # ... 기존 설정 ...
-    
+
     location / {
         proxy_cache my_cache;
         proxy_cache_valid 200 302 10m;
@@ -854,6 +858,3 @@ server {
 5. 필요시 규칙 조정 및 커스터마이징
 
 문제가 발생하면 로그를 확인하고, 필요시 이슈를 생성해주세요!
-
-
-

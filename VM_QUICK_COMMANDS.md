@@ -619,9 +619,7 @@ alias webhookdeploy='cd ~/pr-webhook && ./deploy.sh'
 ```
 
 적용:
+
 ```bash
 source ~/.bashrc
 ```
-
-
-
