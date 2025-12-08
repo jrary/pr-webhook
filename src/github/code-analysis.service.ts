@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OpenAIService } from '../openai/openai.service';
 import { QdrantService } from '../qdrant/qdrant.service';
-import { ViolationType, ViolationSeverity } from './entities/code-review.entity';
+import {
+  ViolationType,
+  ViolationSeverity,
+} from './entities/code-review.entity';
 
 interface FileChange {
   filename: string;
@@ -52,7 +55,7 @@ export class CodeAnalysisService {
     files: FileChange[],
     repository: string,
   ): Promise<AnalysisResult> {
-    this.logger.log(`Analyzing ${files.length} files for ${repository}`);
+    this.logger.log(`🔍 Analyzing ${files.length} files for ${repository}`);
 
     const violations: Violation[] = [];
     let filesAnalyzed = 0;
@@ -89,7 +92,20 @@ export class CodeAnalysisService {
     );
 
     // 승인 여부 결정
-    const shouldApprove = criticalViolations.length <= this.MAX_VIOLATIONS_FOR_APPROVAL;
+    const shouldApprove =
+      criticalViolations.length <= this.MAX_VIOLATIONS_FOR_APPROVAL;
+
+    this.logger.log(`📊 Analysis Results:`);
+    this.logger.log(`  - Total files: ${files.length}`);
+    this.logger.log(`  - Files analyzed: ${filesAnalyzed}`);
+    this.logger.log(`  - Total violations: ${violations.length}`);
+    this.logger.log(
+      `  - Critical violations (errors): ${criticalViolations.length}`,
+    );
+    this.logger.log(`  - Warnings: ${warningViolations.length}`);
+    this.logger.log(
+      `  - Should approve: ${shouldApprove ? '✅ YES' : '❌ NO'}`,
+    );
 
     // 요약 생성
     const summary = this.generateSummary(
@@ -309,7 +325,9 @@ JSON만 반환하고 다른 설명은 하지 마세요.`;
         }
       }
     } catch (error) {
-      this.logger.error(`Failed to parse AI response: ${(error as Error).message}`);
+      this.logger.error(
+        `Failed to parse AI response: ${(error as Error).message}`,
+      );
     }
 
     return violations;
@@ -378,7 +396,9 @@ JSON만 반환하고 다른 설명은 하지 마세요.`;
     filesAnalyzed: number,
   ): string {
     const emoji = approved ? '✅' : '❌';
-    const decision = approved ? '승인 (Approved)' : '변경 요청 (Changes Requested)';
+    const decision = approved
+      ? '승인 (Approved)'
+      : '변경 요청 (Changes Requested)';
 
     let summary = `## ${emoji} 자동 코드 리뷰 결과\n\n`;
     summary += `**결정**: ${decision}\n\n`;
@@ -420,4 +440,3 @@ JSON만 반환하고 다른 설명은 하지 마세요.`;
     return mapping[severity] || ViolationSeverity.WARNING;
   }
 }
-
