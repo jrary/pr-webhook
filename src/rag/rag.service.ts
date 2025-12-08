@@ -545,12 +545,8 @@ export class RagService {
       const projectNotionPageIds =
         await this.projectService.getProjectNotionPageIds(projectId);
 
-      // 프로젝트에 속한 Swagger 문서 키 목록 가져오기
-      const projectSwaggerDocumentKeys =
-        await this.projectService.getProjectSwaggerDocumentKeys(projectId);
-
       this.logger.log(
-        `프로젝트 필터링: Notion 페이지 ${projectNotionPageIds.length}개, Swagger 문서 ${projectSwaggerDocumentKeys.length}개`,
+        `프로젝트 필터링: Notion 페이지 ${projectNotionPageIds.length}개`,
       );
 
       // 토큰 사용량 추적을 위한 변수 초기화

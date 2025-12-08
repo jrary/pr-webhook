@@ -2,7 +2,6 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -10,17 +9,12 @@ import { Repository, In } from 'typeorm';
 import { Project } from './entities/project.entity';
 import { ProjectMember, ProjectRole } from './entities/project-member.entity';
 import { ProjectNotionPage } from './entities/project-notion-page.entity';
-import { ProjectSwaggerDocument } from './entities/project-swagger-document.entity';
 import { NotionPage } from '../notion/entities/notion-page.entity';
-import { SwaggerDocument } from '../swagger/entities/swagger-document.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
-import {
-  AddNotionPagesDto,
-  AddSwaggerDocumentsDto,
-} from './dto/add-documents.dto';
+import { AddNotionPagesDto } from './dto/add-documents.dto';
 
 @Injectable()
 export class ProjectService {
@@ -33,12 +27,8 @@ export class ProjectService {
     private readonly projectMemberRepository: Repository<ProjectMember>,
     @InjectRepository(ProjectNotionPage)
     private readonly projectNotionPageRepository: Repository<ProjectNotionPage>,
-    @InjectRepository(ProjectSwaggerDocument)
-    private readonly projectSwaggerDocumentRepository: Repository<ProjectSwaggerDocument>,
     @InjectRepository(NotionPage)
     private readonly notionPageRepository: Repository<NotionPage>,
-    @InjectRepository(SwaggerDocument)
-    private readonly swaggerDocumentRepository: Repository<SwaggerDocument>,
   ) {}
 
   /**
@@ -85,8 +75,6 @@ export class ProjectService {
         'members.user',
         'notionPages',
         'notionPages.notionPage',
-        'swaggerDocuments',
-        'swaggerDocuments.swaggerDocument',
       ],
     });
 
@@ -270,81 +258,6 @@ export class ProjectService {
   }
 
   /**
-   * 프로젝트에 Swagger 문서 추가
-   */
-  async addSwaggerDocuments(
-    projectId: string,
-    addSwaggerDocumentsDto: AddSwaggerDocumentsDto,
-  ): Promise<ProjectSwaggerDocument[]> {
-    // 프로젝트 존재 확인
-    await this.getProject(projectId);
-
-    // Swagger 문서 존재 확인
-    const swaggerDocuments = await this.swaggerDocumentRepository.find({
-      where: { id: In(addSwaggerDocumentsDto.swaggerDocumentIds) },
-    });
-
-    if (
-      swaggerDocuments.length !==
-      addSwaggerDocumentsDto.swaggerDocumentIds.length
-    ) {
-      throw new NotFoundException('일부 Swagger 문서를 찾을 수 없습니다.');
-    }
-
-    // 이미 추가된 문서 필터링
-    const existingDocs = await this.projectSwaggerDocumentRepository.find({
-      where: {
-        projectId,
-        swaggerDocumentId: In(addSwaggerDocumentsDto.swaggerDocumentIds),
-      },
-    });
-
-    const existingDocIds = new Set(
-      existingDocs.map((d) => d.swaggerDocumentId),
-    );
-    const newDocIds = addSwaggerDocumentsDto.swaggerDocumentIds.filter(
-      (id) => !existingDocIds.has(id),
-    );
-
-    if (newDocIds.length === 0) {
-      throw new BadRequestException(
-        '모든 문서가 이미 프로젝트에 추가되어 있습니다.',
-      );
-    }
-
-    // 새 문서 추가
-    const projectSwaggerDocuments = newDocIds.map((swaggerDocumentId) =>
-      this.projectSwaggerDocumentRepository.create({
-        projectId,
-        swaggerDocumentId,
-      }),
-    );
-
-    return await this.projectSwaggerDocumentRepository.save(
-      projectSwaggerDocuments,
-    );
-  }
-
-  /**
-   * 프로젝트에서 Swagger 문서 제거
-   */
-  async removeSwaggerDocument(
-    projectId: string,
-    swaggerDocumentId: string,
-  ): Promise<void> {
-    const projectSwaggerDocument =
-      await this.projectSwaggerDocumentRepository.findOne({
-        where: { projectId, swaggerDocumentId },
-      });
-
-    if (!projectSwaggerDocument) {
-      throw new NotFoundException('프로젝트에 해당 Swagger 문서가 없습니다.');
-    }
-
-    await this.projectSwaggerDocumentRepository.remove(projectSwaggerDocument);
-  }
-
-  /**
    * 프로젝트에 속한 Notion 페이지 ID 목록 조회
    */
   async getProjectNotionPageIds(projectId: string): Promise<string[]> {
@@ -355,34 +268,6 @@ export class ProjectService {
 
     // NotionPage 엔티티의 notionPageId (실제 Notion API의 페이지 ID) 반환
     return projectNotionPages.map((pnp) => pnp.notionPage.notionPageId);
-  }
-
-  /**
-   * 프로젝트에 속한 Swagger 문서 ID 목록 조회
-   */
-  async getProjectSwaggerDocumentIds(projectId: string): Promise<string[]> {
-    const projectSwaggerDocuments =
-      await this.projectSwaggerDocumentRepository.find({
-        where: { projectId },
-        relations: ['swaggerDocument'],
-      });
-
-    // SwaggerDocument 엔티티의 id 반환
-    return projectSwaggerDocuments.map((psd) => psd.swaggerDocument.id);
-  }
-
-  /**
-   * 프로젝트에 속한 Swagger 문서 키 목록 조회
-   */
-  async getProjectSwaggerDocumentKeys(projectId: string): Promise<string[]> {
-    const projectSwaggerDocuments =
-      await this.projectSwaggerDocumentRepository.find({
-        where: { projectId },
-        relations: ['swaggerDocument'],
-      });
-
-    // SwaggerDocument 엔티티의 key 반환
-    return projectSwaggerDocuments.map((psd) => psd.swaggerDocument.key);
   }
 
   /**
@@ -405,30 +290,6 @@ export class ProjectService {
         lastIndexedAt: page.lastIndexedAt,
       })),
       total: pages.length,
-    };
-  }
-
-  /**
-   * 프로젝트에 추가 가능한 Swagger 문서 목록 조회
-   */
-  async getSelectableSwaggerDocuments() {
-    const documents = await this.swaggerDocumentRepository.find({
-      order: { createdAt: 'DESC' },
-    });
-
-    return {
-      success: true,
-      documents: documents.map((doc) => ({
-        id: doc.id,
-        key: doc.key,
-        title: doc.title,
-        version: doc.version,
-        description: doc.description,
-        apiCount: doc.apiCount,
-        indexingStatus: doc.indexingStatus,
-        lastIndexedAt: doc.lastIndexedAt,
-      })),
-      total: documents.length,
     };
   }
 }

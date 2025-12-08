@@ -12,9 +12,7 @@ import { RagModule } from './rag/rag.module';
 import { AuthModule } from './auth/auth.module';
 import { ConversationModule } from './conversation/conversation.module';
 import { TokenUsageModule } from './token-usage/token-usage.module';
-import { SwaggerModule } from './swagger/swagger.module';
 import { ProjectModule } from './project/project.module';
-import { FigmaModule } from './figma/figma.module';
 import { GitHubModule } from './github/github.module';
 import { getTypeOrmConfig } from './database/typeorm.config';
 
@@ -41,9 +39,7 @@ import { getTypeOrmConfig } from './database/typeorm.config';
     AuthModule,
     ConversationModule,
     TokenUsageModule,
-    SwaggerModule,
     ProjectModule,
-    FigmaModule,
     GitHubModule,
   ],
   controllers: [AppController],

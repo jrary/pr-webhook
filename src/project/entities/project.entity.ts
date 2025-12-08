@@ -8,8 +8,6 @@ import {
 } from 'typeorm';
 import { ProjectMember } from './project-member.entity';
 import { ProjectNotionPage } from './project-notion-page.entity';
-import { ProjectSwaggerDocument } from './project-swagger-document.entity';
-import { ProjectFigmaDocument } from './project-figma-document.entity';
 
 @Entity('projects')
 export class Project {
@@ -37,16 +35,4 @@ export class Project {
     (projectNotionPage) => projectNotionPage.project,
   )
   notionPages: ProjectNotionPage[];
-
-  @OneToMany(
-    () => ProjectSwaggerDocument,
-    (projectSwaggerDoc) => projectSwaggerDoc.project,
-  )
-  swaggerDocuments: ProjectSwaggerDocument[];
-
-  @OneToMany(
-    () => ProjectFigmaDocument,
-    (projectFigmaDoc) => projectFigmaDoc.project,
-  )
-  figmaDocuments: ProjectFigmaDocument[];
 }

@@ -29,10 +29,7 @@ import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
-import {
-  AddNotionPagesDto,
-  AddSwaggerDocumentsDto,
-} from './dto/add-documents.dto';
+import { AddNotionPagesDto } from './dto/add-documents.dto';
 
 @ApiTags('projects')
 @Controller('projects')
@@ -202,42 +199,6 @@ export class ProjectController {
     return { message: 'Notion 페이지가 제거되었습니다.' };
   }
 
-  @Post(':projectId/swagger-documents')
-  @ApiOperation({ summary: '프로젝트에 Swagger 문서 추가' })
-  @ApiParam({ name: 'projectId', description: '프로젝트 ID' })
-  @ApiResponse({ status: 201, description: 'Swagger 문서 추가 성공' })
-  @ApiResponse({ status: 403, description: '권한 없음' })
-  @UseGuards(ProjectMemberGuard)
-  @ProjectRoles(ProjectRole.PROJECT_MANAGER)
-  async addSwaggerDocuments(
-    @Param('projectId') projectId: string,
-    @Body() addSwaggerDocumentsDto: AddSwaggerDocumentsDto,
-  ) {
-    return await this.projectService.addSwaggerDocuments(
-      projectId,
-      addSwaggerDocumentsDto,
-    );
-  }
-
-  @Delete(':projectId/swagger-documents/:swaggerDocumentId')
-  @ApiOperation({ summary: '프로젝트에서 Swagger 문서 제거' })
-  @ApiParam({ name: 'projectId', description: '프로젝트 ID' })
-  @ApiParam({ name: 'swaggerDocumentId', description: 'Swagger 문서 ID' })
-  @ApiResponse({ status: 200, description: 'Swagger 문서 제거 성공' })
-  @ApiResponse({ status: 403, description: '권한 없음' })
-  @UseGuards(ProjectMemberGuard)
-  @ProjectRoles(ProjectRole.PROJECT_MANAGER)
-  async removeSwaggerDocument(
-    @Param('projectId') projectId: string,
-    @Param('swaggerDocumentId') swaggerDocumentId: string,
-  ) {
-    await this.projectService.removeSwaggerDocument(
-      projectId,
-      swaggerDocumentId,
-    );
-    return { message: 'Swagger 문서가 제거되었습니다.' };
-  }
-
   // 선택용 조회 API
   @Get('selectable/notion-pages')
   @ApiOperation({ summary: '프로젝트에 추가 가능한 Notion 페이지 목록 조회' })
@@ -245,13 +206,5 @@ export class ProjectController {
   @ApiResponse({ status: 401, description: '인증 필요' })
   async getSelectableNotionPages() {
     return await this.projectService.getSelectableNotionPages();
-  }
-
-  @Get('selectable/swagger-documents')
-  @ApiOperation({ summary: '프로젝트에 추가 가능한 Swagger 문서 목록 조회' })
-  @ApiResponse({ status: 200, description: 'Swagger 문서 목록 반환' })
-  @ApiResponse({ status: 401, description: '인증 필요' })
-  async getSelectableSwaggerDocuments() {
-    return await this.projectService.getSelectableSwaggerDocuments();
   }
 }
