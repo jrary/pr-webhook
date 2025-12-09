@@ -198,6 +198,7 @@ export class GitHubService {
           analysisResult,
           prEntity,
           pr.user.login,
+          files,
         );
         this.logger.log('✅ Step 7 complete: Review submitted to GitHub');
       } catch (githubError) {
@@ -279,6 +280,7 @@ export class GitHubService {
     analysisResult: any,
     prEntity: PullRequestEntity,
     prAuthor: string,
+    files: Array<{ filename: string; patch?: string }>,
   ) {
     try {
       this.logger.log(
@@ -311,20 +313,57 @@ export class GitHubService {
         prNumber,
       );
 
-      // 새로 달 코멘트 생성
-      const newComments = analysisResult.violations
-        .filter((v: any) => v.lineNumber > 0)
-        .map((v: any) => ({
-          path: v.filePath,
-          line: v.lineNumber,
-          body: `**[${v.type}]** ${v.message}\n\n${v.suggestion ? `💡 제안: ${v.suggestion}` : ''}\n\n${v.ruleReference ? `📚 참고: ${v.ruleReference}` : ''}`,
-        }));
+      // 파일별 diff 포지션 매핑 구성
+      const filePositionMaps: Record<string, Map<number, number>> = {};
+      for (const file of files) {
+        if (!file.patch) continue;
+        filePositionMaps[file.filename] = this.buildLinePositionMap(file.patch);
+      }
 
-      // 중복 코멘트 필터링
+      const unresolvedComments: Array<{
+        path: string;
+        line: number;
+        reason: string;
+        body: string;
+      }> = [];
+
+      // 새로 달 코멘트 생성 (diff position 기반)
+      const newComments = analysisResult.violations
+        .filter((v: any) => v.lineNumber > 0 && v.filePath)
+        .map((v: any) => {
+          const posMap = filePositionMaps[v.filePath];
+          const position = posMap ? posMap.get(v.lineNumber) : undefined;
+
+          const body = `**[${v.type}]** ${v.message}\n\n${v.suggestion ? `💡 제안: ${v.suggestion}` : ''}\n\n${v.ruleReference ? `📚 참고: ${v.ruleReference}` : ''}`;
+
+          if (!position) {
+            unresolvedComments.push({
+              path: v.filePath,
+              line: v.lineNumber,
+              reason: 'diff position not found',
+              body,
+            });
+            return null;
+          }
+
+          return {
+            path: v.filePath,
+            position,
+            body,
+            originalLine: v.lineNumber,
+          };
+        })
+        .filter((v: any) => v !== null);
+
+      // 중복 코멘트 필터링 (파일+원본라인 기반)
       const comments = this.filterDuplicateComments(
         newComments,
         existingComments,
-      );
+      ).map((c: any) => ({
+        path: c.path,
+        position: c.position,
+        body: c.body,
+      }));
 
       this.logger.log(`Creating review with event: ${event}`);
       this.logger.log(`Total violations: ${newComments.length}`);
@@ -335,6 +374,12 @@ export class GitHubService {
       this.logger.log(
         `Summary length: ${analysisResult.summary?.length || 0} chars`,
       );
+
+      if (unresolvedComments.length > 0) {
+        this.logger.warn(
+          `⚠️ Inline comment skipped (position not found): ${unresolvedComments.length}`,
+        );
+      }
 
       // 자기 자신의 PR인 경우 메시지 수정
       let reviewBody = analysisResult.summary;
@@ -409,7 +454,12 @@ export class GitHubService {
    * 중복 코멘트 필터링
    */
   private filterDuplicateComments(
-    newComments: Array<{ path: string; line: number; body: string }>,
+    newComments: Array<{
+      path: string;
+      line?: number;
+      body: string;
+      originalLine?: number;
+    }>,
     existingComments: Array<{ path: string; line: number; body: string }>,
   ): Array<{ path: string; line: number; body: string }> {
     return newComments.filter((newComment) => {
@@ -418,7 +468,7 @@ export class GitHubService {
         // 파일명과 라인이 같은지
         if (
           existing.path !== newComment.path ||
-          existing.line !== newComment.line
+          existing.line !== (newComment as any).originalLine
         ) {
           return false;
         }
@@ -448,6 +498,45 @@ export class GitHubService {
   private extractViolationType(commentBody: string): string | null {
     const match = commentBody.match(/\*\*\[([^\]]+)\]\*\*/);
     return match ? match[1] : null;
+  }
+
+  /**
+   * unified diff에서 new 파일 라인 → diff position 매핑 생성
+   */
+  private buildLinePositionMap(patch: string): Map<number, number> {
+    const map = new Map<number, number>();
+    const lines = patch.split('\n');
+
+    let position = 0; // diff 내 위치 (1-based로 저장)
+    let newLine = 0;
+
+    const hunkHeader = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+
+    for (const line of lines) {
+      const headerMatch = line.match(hunkHeader);
+      if (headerMatch) {
+        newLine = parseInt(headerMatch[1], 10);
+        position++; // 헤더 자체도 위치로 카운트
+        continue;
+      }
+
+      if (line.startsWith('+')) {
+        // 추가된 라인: newLine을 매핑
+        map.set(newLine, position);
+        newLine++;
+        position++;
+      } else if (line.startsWith('-')) {
+        // 삭제된 라인: position만 증가
+        position++;
+      } else {
+        // 공백(컨텍스트) 라인
+        map.set(newLine, position);
+        newLine++;
+        position++;
+      }
+    }
+
+    return map;
   }
 
   /**
