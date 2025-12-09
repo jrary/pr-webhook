@@ -72,4 +72,3 @@ export class CodeReviewEntity {
   @CreateDateColumn()
   createdAt: Date;
 }
-

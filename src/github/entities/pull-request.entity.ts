@@ -85,4 +85,3 @@ export class PullRequestEntity {
   @UpdateDateColumn()
   updatedAt: Date;
 }
-

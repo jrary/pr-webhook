@@ -1,5 +1,4 @@
 import { NestFactory } from '@nestjs/core';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
@@ -29,38 +28,6 @@ async function bootstrap() {
       transform: true, // 자동 타입 변환
     }),
   );
-
-  const config = new DocumentBuilder()
-    .setTitle('RAG Chat API')
-    .setDescription('The RAG Chat API description')
-    .setVersion('1.0')
-    .addServer('http://localhost:3001', '로컬 개발 서버')
-    .addServer('https://api.example.com', '프로덕션 서버')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        name: 'JWT',
-        description: 'JWT 토큰을 입력하세요',
-        in: 'header',
-      },
-      'JWT-auth', // 이 이름을 컨트롤러에서 사용
-    )
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-
-  // Swagger UI 설정
-  SwaggerModule.setup('api', app, document);
-
-  // OpenAPI Generator를 위한 JSON 스펙 엔드포인트
-  app.getHttpAdapter().get('/api-json', (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    res.send(document);
-  });
-
-  // OpenAPI Generator를 위한 YAML 스펙 엔드포인트 (선택사항)
-  // YAML을 사용하려면 js-yaml 패키지가 필요합니다
 
   await app.listen(process.env.PORT ?? 3001);
 }

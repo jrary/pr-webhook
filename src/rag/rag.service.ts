@@ -1,28 +1,15 @@
-import {
-  Injectable,
-  Logger,
-  ForbiddenException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { NotionService } from '../notion/notion.service';
 import { OpenAIService } from '../openai/openai.service';
 import { QdrantService } from '../qdrant/qdrant.service';
-import { ProjectService } from '../project/project.service';
 import {
   NotionPage as NotionPageEntity,
   IndexingStatus,
 } from '../notion/entities/notion-page.entity';
 import { randomUUID } from 'crypto';
-
-// Define the shape of a Qdrant search result
-export interface SearchResult {
-  id: string | number;
-  score: number;
-  payload: QdrantPayload;
-}
 
 export interface QdrantPayload {
   text?: string;
@@ -88,13 +75,6 @@ interface QdrantScrollResult {
   [key: string]: unknown;
 }
 
-interface QdrantSearchItem {
-  id: string | number;
-  score: number;
-  payload: QdrantPayload;
-  [key: string]: unknown;
-}
-
 @Injectable()
 export class RagService {
   private readonly logger = new Logger(RagService.name);
@@ -102,14 +82,12 @@ export class RagService {
   private readonly VECTOR_SIZE = 1536; // text-embedding-3-small 차원
   private readonly CHUNK_SIZE = 1000; // 청크 크기 (문자 수)
   private readonly CHUNK_OVERLAP = 200; // 청크 오버랩
-  private readonly MIN_SCORE_THRESHOLD = 0.35; // 최소 유사도 점수 (Cosine similarity)
 
   constructor(
     private readonly notionService: NotionService,
     private readonly openaiService: OpenAIService,
     private readonly qdrantService: QdrantService,
     private readonly configService: ConfigService,
-    private readonly projectService: ProjectService,
     @InjectRepository(NotionPageEntity)
     private readonly notionPageRepository: Repository<NotionPageEntity>,
   ) {}
@@ -508,243 +486,6 @@ export class RagService {
       return {
         success: false,
         error: (error as Error).message,
-      };
-    }
-  }
-  async query(
-    question: string,
-    conversationHistory?: Array<{
-      role: 'user' | 'assistant';
-      content: string;
-    }>,
-    projectId?: string,
-    userId?: string,
-  ) {
-    try {
-      // projectId는 필수
-      if (!projectId) {
-        throw new BadRequestException('프로젝트 ID는 필수입니다.');
-      }
-
-      if (!userId) {
-        throw new ForbiddenException(
-          '프로젝트 쿼리를 위해서는 사용자 인증이 필요합니다.',
-        );
-      }
-
-      // 사용자가 프로젝트 멤버인지 확인
-      const member = await this.projectService.getProjectMember(
-        projectId,
-        userId,
-      );
-      if (!member) {
-        throw new ForbiddenException('프로젝트에 접근할 권한이 없습니다.');
-      }
-
-      // 프로젝트에 속한 Notion 페이지 ID 목록 가져오기
-      const projectNotionPageIds =
-        await this.projectService.getProjectNotionPageIds(projectId);
-
-      this.logger.log(
-        `프로젝트 필터링: Notion 페이지 ${projectNotionPageIds.length}개`,
-      );
-
-      // 토큰 사용량 추적을 위한 변수 초기화
-      const totalUsage = {
-        promptTokens: 0,
-        completionTokens: 0,
-        totalTokens: 0,
-      };
-
-      // 1. LLM을 사용하여 질문을 검색에 최적화된 쿼리로 재작성
-      this.logger.log(`원본 질문: "${question}"`);
-      const { rewrittenQuery, usage: rewriteUsage } =
-        await this.openaiService.rewriteQueryForSearch(
-          question,
-          conversationHistory,
-        );
-      this.logger.log(`재작성된 검색 쿼리: "${rewrittenQuery}"`);
-
-      // 토큰 사용량 합산
-      totalUsage.promptTokens += rewriteUsage.promptTokens;
-      totalUsage.completionTokens += rewriteUsage.completionTokens;
-      totalUsage.totalTokens += rewriteUsage.totalTokens;
-
-      // 2. 재작성된 쿼리에 대한 임베딩 생성
-      const { embedding, usage: embeddingUsage } =
-        await this.openaiService.getEmbedding(rewrittenQuery);
-
-      // 토큰 사용량 합산
-      totalUsage.promptTokens += embeddingUsage.promptTokens;
-      totalUsage.totalTokens += embeddingUsage.totalTokens;
-
-      // 프로젝트에 문서가 없는 경우
-      if (projectNotionPageIds.length === 0) {
-        this.logger.warn(
-          `프로젝트 ${projectId}에 문서가 없습니다. 빈 결과를 반환합니다.`,
-        );
-        return {
-          success: false,
-          answer: '프로젝트에 문서가 없습니다. 프로젝트 관리자에게 문의하세요.',
-          sources: [],
-          rewrittenQuery,
-        };
-      }
-
-      // 3. Qdrant 검색 필터 설정 (프로젝트별 문서만 검색)
-      // Qdrant에서 여러 값을 필터링하려면 should를 사용해야 함
-      const searchFilter = {
-        should: projectNotionPageIds.map((pageId) => ({
-          key: 'pageId',
-          match: { value: pageId },
-        })),
-      };
-
-      // 3. Qdrant에서 유사한 청크 검색 (상위 10개로 증가하여 더 많은 컨텍스트 확보)
-      const searchResult = await this.qdrantService.search(
-        this.COLLECTION_NAME,
-        embedding,
-        10, // limit을 5에서 10으로 증가
-        searchFilter,
-      );
-
-      // 3. 검색 결과 포맷팅 및 스코어 필터링
-      const allResults: SearchResult[] = (
-        (searchResult as QdrantSearchItem[]) || []
-      ).map((item: QdrantSearchItem) => ({
-        id: item.id,
-        score: item.score,
-        payload: item.payload,
-      }));
-
-      // 4. 최소 스코어 임계값 이상인 결과만 필터링
-      let results = allResults.filter(
-        (result) => result.score >= this.MIN_SCORE_THRESHOLD,
-      );
-
-      this.logger.log(
-        `검색 결과: 전체 ${allResults.length}개, 필터링 후 ${results.length}개 (임계값: ${this.MIN_SCORE_THRESHOLD})`,
-      );
-
-      // 5. 필터링 후 결과가 없으면 임계값을 낮춰서 재시도
-      if (results.length === 0 && allResults.length > 0) {
-        const maxScore = allResults[0].score;
-        // 최고 점수가 0.25 이상이면 임계값을 낮춰서 재시도
-        if (maxScore >= 0.25) {
-          const loweredThreshold = Math.max(0.25, maxScore - 0.05);
-          results = allResults.filter(
-            (result) => result.score >= loweredThreshold,
-          );
-          this.logger.log(
-            `임계값을 ${this.MIN_SCORE_THRESHOLD}에서 ${loweredThreshold.toFixed(3)}으로 낮춰서 재시도: ${results.length}개 결과 발견`,
-          );
-        }
-      }
-
-      // 6. 여전히 결과가 없으면 에러 반환
-      if (results.length === 0) {
-        const maxScore = allResults.length > 0 ? allResults[0].score : 0;
-        this.logger.warn(
-          `검색 결과가 없습니다. 최고 점수: ${maxScore.toFixed(4)}`,
-        );
-        return {
-          success: false,
-          answer:
-            '제공된 문서에는 이 질문에 대한 충분히 관련성 있는 정보가 없습니다.',
-          sources: [],
-          maxScore: maxScore,
-          threshold: this.MIN_SCORE_THRESHOLD,
-          rewrittenQuery, // 재작성된 쿼리도 반환
-        };
-      }
-
-      // 7. 검색된 문서들을 LLM에 전달할 형식으로 변환
-      const contextDocuments = results.map((result) => ({
-        text: (result.payload.text as string) || '',
-        pageTitle: (result.payload.pageTitle as string) || 'Unknown',
-        pageUrl: (result.payload.pageUrl as string) || '',
-      }));
-
-      this.logger.log(
-        `LLM 답변 생성 시작: ${results.length}개의 문서 청크 사용 (최고 점수: ${results[0].score.toFixed(3)})`,
-      );
-
-      // 8. LLM을 사용하여 문서 기반 답변 생성
-      const { answer, usage: answerUsage } =
-        await this.openaiService.generateAnswer(
-          question,
-          contextDocuments,
-          conversationHistory,
-        );
-
-      // 토큰 사용량 합산
-      totalUsage.promptTokens += answerUsage.promptTokens;
-      totalUsage.completionTokens += answerUsage.completionTokens;
-      totalUsage.totalTokens += answerUsage.totalTokens;
-
-      // 9. 답변에서 실제로 사용된 문서 추출 (문서 제목 기반)
-      const usedDocumentTitles = this.extractUsedDocumentTitles(
-        answer,
-        contextDocuments,
-      );
-
-      // 10. 실제로 사용된 문서만 필터링하여 반환
-      let sources: Array<{
-        pageTitle: string;
-        pageUrl: string;
-        score: number;
-        chunkText: string;
-      }>;
-      if (usedDocumentTitles.size > 0) {
-        // 인용된 문서가 있으면 해당 문서만 반환
-        sources = results
-          .filter((result) => {
-            const pageTitle = (result.payload.pageTitle as string) || '';
-            return usedDocumentTitles.has(pageTitle);
-          })
-          .map((result) => {
-            const text = (result.payload.text as string) || '';
-            return {
-              pageTitle: (result.payload.pageTitle as string) || 'Unknown',
-              pageUrl: (result.payload.pageUrl as string) || '',
-              score: result.score,
-              chunkText: text.substring(0, 200) + '...', // 미리보기
-            };
-          });
-        this.logger.log(
-          `답변에 실제로 사용된 문서: ${usedDocumentTitles.size}개 (전체 검색 결과: ${results.length}개)`,
-        );
-      } else {
-        // 인용이 없으면 상위 점수 문서 3개만 반환 (실제로 사용되었을 가능성이 높음)
-        sources = results.slice(0, 3).map((result) => {
-          const text = (result.payload.text as string) || '';
-          return {
-            pageTitle: (result.payload.pageTitle as string) || 'Unknown',
-            pageUrl: (result.payload.pageUrl as string) || '',
-            score: result.score,
-            chunkText: text.substring(0, 200) + '...', // 미리보기
-          };
-        });
-        this.logger.log(
-          `답변에서 문서 인용을 찾을 수 없어 상위 3개 문서를 반환합니다.`,
-        );
-      }
-
-      return {
-        success: true,
-        answer,
-        sources,
-        question,
-        rewrittenQuery, // 재작성된 쿼리도 반환하여 디버깅/모니터링에 유용
-        usage: totalUsage, // 모든 LLM 호출의 토큰 사용량 합산
-      };
-    } catch (error) {
-      this.logger.error(`Failed to process query: ${(error as Error).message}`);
-      return {
-        success: false,
-        answer: '답변 생성 중 오류가 발생했습니다.',
-        error: (error as Error).message,
-        sources: [],
       };
     }
   }

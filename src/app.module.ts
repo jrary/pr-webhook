@@ -3,16 +3,11 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
-import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { QdrantModule } from './qdrant/qdrant.module';
 import { NotionModule } from './notion/notion.module';
 import { OpenAIModule } from './openai/openai.module';
 import { RagModule } from './rag/rag.module';
-import { AuthModule } from './auth/auth.module';
-import { ConversationModule } from './conversation/conversation.module';
-import { TokenUsageModule } from './token-usage/token-usage.module';
-import { ProjectModule } from './project/project.module';
 import { GitHubModule } from './github/github.module';
 import { getTypeOrmConfig } from './database/typeorm.config';
 
@@ -36,13 +31,9 @@ import { getTypeOrmConfig } from './database/typeorm.config';
     NotionModule,
     OpenAIModule,
     RagModule,
-    AuthModule,
-    ConversationModule,
-    TokenUsageModule,
-    ProjectModule,
     GitHubModule,
   ],
-  controllers: [AppController],
+  controllers: [],
   providers: [
     AppService,
     {
