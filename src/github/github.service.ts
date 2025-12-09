@@ -1,3 +1,9 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -367,7 +373,9 @@ export class GitHubService {
 
       this.logger.log(`Creating review with event: ${event}`);
       this.logger.log(`Total violations: ${newComments.length}`);
-      this.logger.log(`New inline comments: ${comments.length}`);
+      this.logger.log(
+        `New inline comments (with position): ${comments.length}`,
+      );
       this.logger.log(
         `Skipped duplicates: ${newComments.length - comments.length}`,
       );
@@ -388,21 +396,79 @@ export class GitHubService {
       }
 
       // GitHub API로 리뷰 생성
-      const { data: review } = await this.octokit.pulls.createReview({
+      const createReviewPayload: any = {
         owner,
         repo,
         pull_number: prNumber,
         event,
         body: reviewBody,
-        comments: comments.length > 0 ? comments : undefined,
-      });
+      };
 
-      prEntity.githubReviewId = review.id.toString();
-      await this.prRepository.save(prEntity);
+      if (comments.length > 0) {
+        createReviewPayload.comments = comments;
+      }
 
       this.logger.log(
-        `✅ Review submitted successfully: ${owner}/${repo}#${prNumber} - ${event} (Review ID: ${review.id})`,
+        `Submitting review payload with ${comments.length} inline comments`,
       );
+
+      try {
+        const { data: review } =
+          await this.octokit.pulls.createReview(createReviewPayload);
+
+        prEntity.githubReviewId = review.id.toString();
+        await this.prRepository.save(prEntity);
+
+        this.logger.log(
+          `✅ Review submitted successfully: ${owner}/${repo}#${prNumber} - ${event} (Review ID: ${review.id})`,
+        );
+      } catch (createErr) {
+        const isLineError =
+          (createErr as any)?.status === 422 &&
+          ((createErr as any)?.response?.data?.errors || [])
+            .map((e: any) => `${e}`)
+            .some((e: string) =>
+              e.toLowerCase().includes('line could not be resolved'),
+            );
+
+        if (!isLineError) {
+          throw createErr;
+        }
+
+        // Fallback: 인라인 코멘트 없이 요약만 남기고, 스킵된 코멘트 정보를 본문에 첨부
+        this.logger.warn(
+          `⚠️ GitHub returned 'Line could not be resolved'. Retrying review without inline comments.`,
+        );
+
+        const skippedSummary =
+          unresolvedComments.length > 0
+            ? unresolvedComments
+                .map(
+                  (c) =>
+                    `- ${c.path}:${c.line ?? 'n/a'} (${
+                      c.reason || 'position error'
+                    })`,
+                )
+                .join('\n')
+            : 'no inline comments';
+
+        const fallbackBody = `${reviewBody}\n\n⚠️ 일부 인라인 코멘트를 달 수 없어 요약만 남깁니다.\n${skippedSummary}`;
+
+        const { data: review } = await this.octokit.pulls.createReview({
+          owner,
+          repo,
+          pull_number: prNumber,
+          event,
+          body: fallbackBody,
+        });
+
+        prEntity.githubReviewId = review.id.toString();
+        await this.prRepository.save(prEntity);
+
+        this.logger.log(
+          `✅ Review submitted without inline comments: ${owner}/${repo}#${prNumber} (Review ID: ${review.id})`,
+        );
+      }
     } catch (error) {
       this.logger.error(
         `❌ Failed to submit review for ${owner}/${repo}#${prNumber}`,
@@ -456,12 +522,19 @@ export class GitHubService {
   private filterDuplicateComments(
     newComments: Array<{
       path: string;
-      line?: number;
       body: string;
       originalLine?: number;
+      position?: number;
+      line?: number;
     }>,
     existingComments: Array<{ path: string; line: number; body: string }>,
-  ): Array<{ path: string; line: number; body: string }> {
+  ): Array<{
+    path: string;
+    body: string;
+    originalLine?: number;
+    position?: number;
+    line?: number;
+  }> {
     return newComments.filter((newComment) => {
       // 같은 파일, 같은 라인에 비슷한 내용의 코멘트가 있는지 확인
       const isDuplicate = existingComments.some((existing) => {
