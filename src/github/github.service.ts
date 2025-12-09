@@ -176,8 +176,19 @@ export class GitHubService {
         this.logger.warn('⚠️ Continuing without saving decision to DB');
       }
 
-      // 6. GitHub에 리뷰 제출
-      this.logger.log('Step 6: Submitting review to GitHub...');
+      // 6. 리뷰어 자동 지정 (선택적)
+      this.logger.log('Step 6: Adding reviewers (if configured)...');
+      try {
+        await this.addReviewers(owner, repo, prNumber, pr.user.login);
+      } catch (reviewerError) {
+        // 리뷰어 추가 실패는 치명적이지 않음
+        this.logger.warn(
+          `⚠️ Failed to add reviewers: ${(reviewerError as Error).message}`,
+        );
+      }
+
+      // 7. GitHub에 리뷰 제출
+      this.logger.log('Step 7: Submitting review to GitHub...');
       try {
         await this.submitReview(
           owner,
@@ -188,7 +199,7 @@ export class GitHubService {
           prEntity,
           pr.user.login,
         );
-        this.logger.log('✅ Step 6 complete: Review submitted to GitHub');
+        this.logger.log('✅ Step 7 complete: Review submitted to GitHub');
       } catch (githubError) {
         this.logger.error('❌ Failed to submit review to GitHub:', githubError);
         throw new Error(
@@ -206,6 +217,53 @@ export class GitHubService {
         `❌ Fatal error processing PR ${payload.repository?.full_name}#${payload.pull_request?.number}:`,
         error,
       );
+      throw error;
+    }
+  }
+
+  /**
+   * PR에 자동으로 리뷰어 추가
+   */
+  private async addReviewers(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    prAuthor: string,
+  ) {
+    try {
+      // 환경변수에서 리뷰어 목록 가져오기
+      const reviewersConfig = this.configService.get<string>('AUTO_REVIEWERS');
+
+      if (!reviewersConfig) {
+        this.logger.log('No auto reviewers configured');
+        return;
+      }
+
+      // 쉼표로 구분된 리뷰어 목록 파싱
+      const reviewers = reviewersConfig
+        .split(',')
+        .map((r) => r.trim())
+        .filter((r) => r.length > 0)
+        .filter((r) => r.toLowerCase() !== prAuthor.toLowerCase()); // PR 작성자 제외
+
+      if (reviewers.length === 0) {
+        this.logger.log('No reviewers to add (PR author excluded)');
+        return;
+      }
+
+      this.logger.log(`Adding reviewers: ${reviewers.join(', ')}`);
+
+      // GitHub API로 리뷰어 추가
+      await this.octokit.pulls.requestReviewers({
+        owner,
+        repo,
+        pull_number: prNumber,
+        reviewers,
+      });
+
+      this.logger.log(`✅ Reviewers added: ${reviewers.join(', ')}`);
+    } catch (error) {
+      this.logger.error(`Failed to add reviewers: ${(error as Error).message}`);
       throw error;
     }
   }
@@ -246,7 +304,15 @@ export class GitHubService {
           decision === ReviewDecision.APPROVED ? 'APPROVE' : 'REQUEST_CHANGES';
       }
 
-      const comments = analysisResult.violations
+      // 기존 코멘트 가져오기 (중복 방지)
+      const existingComments = await this.getExistingReviewComments(
+        owner,
+        repo,
+        prNumber,
+      );
+
+      // 새로 달 코멘트 생성
+      const newComments = analysisResult.violations
         .filter((v: any) => v.lineNumber > 0)
         .map((v: any) => ({
           path: v.filePath,
@@ -254,8 +320,18 @@ export class GitHubService {
           body: `**[${v.type}]** ${v.message}\n\n${v.suggestion ? `💡 제안: ${v.suggestion}` : ''}\n\n${v.ruleReference ? `📚 참고: ${v.ruleReference}` : ''}`,
         }));
 
+      // 중복 코멘트 필터링
+      const comments = this.filterDuplicateComments(
+        newComments,
+        existingComments,
+      );
+
       this.logger.log(`Creating review with event: ${event}`);
-      this.logger.log(`Number of inline comments: ${comments.length}`);
+      this.logger.log(`Total violations: ${newComments.length}`);
+      this.logger.log(`New inline comments: ${comments.length}`);
+      this.logger.log(
+        `Skipped duplicates: ${newComments.length - comments.length}`,
+      );
       this.logger.log(
         `Summary length: ${analysisResult.summary?.length || 0} chars`,
       );
@@ -299,6 +375,79 @@ export class GitHubService {
 
       throw error;
     }
+  }
+
+  /**
+   * PR의 기존 리뷰 코멘트 가져오기
+   */
+  private async getExistingReviewComments(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<Array<{ path: string; line: number; body: string }>> {
+    try {
+      const { data: comments } = await this.octokit.pulls.listReviewComments({
+        owner,
+        repo,
+        pull_number: prNumber,
+      });
+
+      return comments.map((comment) => ({
+        path: comment.path,
+        line: comment.line || comment.original_line || 0,
+        body: comment.body,
+      }));
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch existing comments: ${(error as Error).message}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * 중복 코멘트 필터링
+   */
+  private filterDuplicateComments(
+    newComments: Array<{ path: string; line: number; body: string }>,
+    existingComments: Array<{ path: string; line: number; body: string }>,
+  ): Array<{ path: string; line: number; body: string }> {
+    return newComments.filter((newComment) => {
+      // 같은 파일, 같은 라인에 비슷한 내용의 코멘트가 있는지 확인
+      const isDuplicate = existingComments.some((existing) => {
+        // 파일명과 라인이 같은지
+        if (
+          existing.path !== newComment.path ||
+          existing.line !== newComment.line
+        ) {
+          return false;
+        }
+
+        // 코멘트 내용의 유사성 확인
+        // violation type 추출 (예: [SECURITY], [CODE_QUALITY])
+        const newType = this.extractViolationType(newComment.body);
+        const existingType = this.extractViolationType(existing.body);
+
+        // 같은 타입의 위반이면 중복으로 간주
+        return newType && existingType && newType === existingType;
+      });
+
+      if (isDuplicate) {
+        this.logger.log(
+          `Skipping duplicate comment: ${newComment.path}:${newComment.line}`,
+        );
+      }
+
+      return !isDuplicate;
+    });
+  }
+
+  /**
+   * 코멘트에서 위반 타입 추출
+   */
+  private extractViolationType(commentBody: string): string | null {
+    const match = commentBody.match(/\*\*\[([^\]]+)\]\*\*/);
+    return match ? match[1] : null;
   }
 
   /**
