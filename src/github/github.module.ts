@@ -23,4 +23,3 @@ import { CodeReviewEntity } from './entities/code-review.entity';
   exports: [GitHubService],
 })
 export class GitHubModule {}
-
