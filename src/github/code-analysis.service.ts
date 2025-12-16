@@ -247,17 +247,22 @@ export class CodeAnalysisService {
       return violations;
     }
 
+    // 파일 확장자 기반 컨텍스트 추가
+    const fileExtension = file.filename.split('.').pop()?.toLowerCase() || '';
+    const languageContext = this.getLanguageContext(fileExtension);
+
     // RAG를 사용하여 규칙 문서 검색
-    const query = `파일명: ${file.filename}\n변경된 코드:\n${addedLines.substring(0, 1000)}`;
+    // 파일명, 언어, 변경된 코드를 모두 포함한 쿼리 생성
+    const query = `파일명: ${file.filename}\n언어: ${languageContext}\n변경된 코드:\n${addedLines.substring(0, 1000)}`;
 
     // 임베딩 생성
     const { embedding } = await this.openaiService.getEmbedding(query);
 
-    // Qdrant에서 관련 규칙 검색
+    // Qdrant에서 관련 규칙 검색 (더 많은 결과 가져오기)
     const searchResult = await this.qdrantService.search(
       this.COLLECTION_NAME,
       embedding,
-      5,
+      10, // 5개에서 10개로 증가
     );
 
     if (!searchResult || searchResult.length === 0) {
@@ -265,72 +270,248 @@ export class CodeAnalysisService {
       return violations;
     }
 
-    // 관련 규칙 문서 추출
-    const rules = searchResult.map((result: any) => ({
-      text: result.payload.text || '',
-      title: result.payload.pageTitle || '',
-      score: result.score,
-    }));
+    // 관련 규칙 문서 추출 (점수 기반 필터링)
+    const minScore = 0.5; // 최소 유사도 점수
+    const rules = searchResult
+      .filter((result: any) => result.score >= minScore)
+      .map((result: any) => ({
+        text: result.payload.text || '',
+        title: result.payload.pageTitle || 'Unknown',
+        url: result.payload.pageUrl || '',
+        score: result.score,
+      }));
 
-    // AI에게 코드 리뷰 요청
-    const prompt = `당신은 코드 리뷰어입니다. 다음 규칙 문서를 기반으로 코드 변경 사항을 검토하세요.
+    if (rules.length === 0) {
+      this.logger.warn(
+        `No rules found with sufficient similarity (min score: ${minScore})`,
+      );
+      return violations;
+    }
 
-## 규칙 문서
-${rules.map((r) => `### ${r.title}\n${r.text}`).join('\n\n')}
+    this.logger.log(
+      `Found ${rules.length} relevant rules for ${file.filename} (avg score: ${(rules.reduce((sum, r) => sum + r.score, 0) / rules.length).toFixed(3)})`,
+    );
 
-## 파일명
-${file.filename}
+    // 라인 번호 매핑 생성 (더 정확한 라인 번호 추출을 위해)
+    const lineMapping = this.buildLineMapping(patch);
 
-## 변경된 코드
+    // AI에게 코드 리뷰 요청 (개선된 프롬프트)
+    const prompt = `당신은 전문 코드 리뷰어입니다. 다음 규칙 문서를 기반으로 코드 변경 사항을 철저히 검토하세요.
+
+## 규칙 문서 (Notion에서 가져온 코딩 규칙)
+${rules
+  .map(
+    (r, idx) =>
+      `### ${idx + 1}. ${r.title}${r.url ? ` (${r.url})` : ''}\n유사도: ${(r.score * 100).toFixed(1)}%\n${r.text}`,
+  )
+  .join('\n\n')}
+
+## 분석 대상
+- **파일명**: ${file.filename}
+- **언어/프레임워크**: ${languageContext}
+- **변경된 코드**:
+\`\`\`${this.getCodeBlockLanguage(fileExtension)}
+${addedLines.substring(0, 3000)}
 \`\`\`
-${addedLines.substring(0, 2000)}
-\`\`\`
 
-위 코드가 규칙을 위반했는지 판단하고, 위반 사항이 있다면 다음 JSON 형식으로 응답하세요:
+## 검토 지침
+1. 위 규칙 문서들을 참고하여 코드 변경 사항을 검토하세요.
+2. 규칙 위반이 명확한 경우에만 위반으로 표시하세요.
+3. 각 위반 사항에 대해 구체적인 설명과 개선 제안을 제공하세요.
+4. 위반한 규칙의 제목과 URL을 명시하세요.
+
+## 응답 형식
+위반 사항이 있다면 다음 JSON 형식으로 응답하세요:
 [
   {
     "violated": true,
+    "lineNumber": 123,  // 위반이 발생한 라인 번호 (추정 가능한 경우)
     "type": "naming_convention|security|code_quality|documentation|other",
     "severity": "error|warning|info",
-    "message": "위반 설명",
-    "suggestion": "개선 제안",
+    "message": "구체적인 위반 설명",
+    "suggestion": "개선 제안 (구체적으로)",
     "ruleReference": "위반한 규칙 제목",
+    "ruleUrl": "규칙 문서 URL (있는 경우)",
     "confidence": 0.0~1.0
   }
 ]
 
 위반 사항이 없다면 빈 배열 []을 반환하세요.
-JSON만 반환하고 다른 설명은 하지 마세요.`;
+**중요**: JSON만 반환하고 다른 설명은 하지 마세요.`;
 
     try {
       const response = await this.openaiService.chat([
+        {
+          role: 'system',
+          content:
+            '당신은 전문 코드 리뷰어입니다. 규칙 문서를 기반으로 코드를 검토하고, 위반 사항을 정확하고 구체적으로 식별합니다.',
+        },
         { role: 'user', content: prompt },
       ]);
 
-      // JSON 파싱
-      const aiViolations = JSON.parse(response.content);
+      // JSON 파싱 (응답에서 JSON만 추출)
+      let responseContent = response.content.trim();
+
+      // JSON 코드 블록이 있는 경우 제거
+      if (responseContent.startsWith('```')) {
+        const jsonMatch = responseContent.match(
+          /```(?:json)?\s*(\[.*?\])\s*```/s,
+        );
+        if (jsonMatch) {
+          responseContent = jsonMatch[1];
+        } else {
+          // 코드 블록 제거
+          responseContent = responseContent.replace(/```[a-z]*\n?/g, '').trim();
+        }
+      }
+
+      const aiViolations = JSON.parse(responseContent);
 
       for (const v of aiViolations) {
         if (v.violated) {
+          // 라인 번호 매핑 적용
+          let lineNumber = v.lineNumber || 0;
+          if (lineNumber > 0 && lineMapping.has(lineNumber)) {
+            lineNumber = lineMapping.get(lineNumber) || lineNumber;
+          }
+
+          // 규칙 참조에 URL 추가
+          let ruleReference = v.ruleReference || '';
+          if (v.ruleUrl) {
+            ruleReference = `${ruleReference} (${v.ruleUrl})`;
+          }
+
           violations.push({
             filePath: file.filename,
-            lineNumber: 0, // AI는 특정 라인을 지정하지 않음
+            lineNumber: lineNumber,
             type: this.mapViolationType(v.type),
             severity: this.mapViolationSeverity(v.severity),
             message: v.message,
             suggestion: v.suggestion,
-            ruleReference: v.ruleReference,
-            confidenceScore: v.confidence,
+            ruleReference: ruleReference,
+            confidenceScore: v.confidence || 0.8,
           });
         }
       }
+
+      if (violations.length > 0) {
+        this.logger.log(
+          `Found ${violations.length} violations in ${file.filename} using RAG`,
+        );
+      }
     } catch (error) {
       this.logger.error(
-        `Failed to parse AI response: ${(error as Error).message}`,
+        `Failed to parse AI response for ${file.filename}: ${(error as Error).message}`,
       );
+      // 에러 상세 정보 로깅 (개발 환경에서만)
+      if (this.configService.get<string>('NODE_ENV') === 'development') {
+        this.logger.debug(`Error details: ${(error as Error).stack}`);
+      }
     }
 
     return violations;
+  }
+
+  /**
+   * 파일 확장자에 따른 언어 컨텍스트 반환
+   */
+  private getLanguageContext(fileExtension: string): string {
+    const contextMap: Record<string, string> = {
+      ts: 'TypeScript',
+      js: 'JavaScript',
+      tsx: 'TypeScript React',
+      jsx: 'JavaScript React',
+      py: 'Python',
+      java: 'Java',
+      go: 'Go',
+      rs: 'Rust',
+      cpp: 'C++',
+      c: 'C',
+      cs: 'C#',
+      php: 'PHP',
+      rb: 'Ruby',
+      swift: 'Swift',
+      kt: 'Kotlin',
+      sql: 'SQL',
+      sh: 'Shell Script',
+      yml: 'YAML',
+      yaml: 'YAML',
+      json: 'JSON',
+      md: 'Markdown',
+    };
+
+    return contextMap[fileExtension] || fileExtension.toUpperCase();
+  }
+
+  /**
+   * 코드 블록 언어 식별자 반환
+   */
+  private getCodeBlockLanguage(fileExtension: string): string {
+    const langMap: Record<string, string> = {
+      ts: 'typescript',
+      js: 'javascript',
+      tsx: 'tsx',
+      jsx: 'jsx',
+      py: 'python',
+      java: 'java',
+      go: 'go',
+      rs: 'rust',
+      cpp: 'cpp',
+      c: 'c',
+      cs: 'csharp',
+      php: 'php',
+      rb: 'ruby',
+      swift: 'swift',
+      kt: 'kotlin',
+      sql: 'sql',
+      sh: 'bash',
+      yml: 'yaml',
+      yaml: 'yaml',
+      json: 'json',
+      md: 'markdown',
+    };
+
+    return langMap[fileExtension] || '';
+  }
+
+  /**
+   * diff 패치에서 라인 번호 매핑 생성
+   * (원본 라인 번호 -> 실제 파일 라인 번호)
+   */
+  private buildLineMapping(patch: string): Map<number, number> {
+    const mapping = new Map<number, number>();
+    const lines = patch.split('\n');
+
+    let currentNewLine = 0;
+    let positionInDiff = 0;
+
+    for (const line of lines) {
+      positionInDiff++;
+
+      // diff 헤더에서 새 파일의 시작 라인 번호 추출
+      if (line.startsWith('@@')) {
+        const match = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (match) {
+          currentNewLine = parseInt(match[1], 10);
+        }
+        continue;
+      }
+
+      // 추가된 라인 또는 컨텍스트 라인
+      if (
+        line.startsWith('+') ||
+        (!line.startsWith('-') && !line.startsWith('@@'))
+      ) {
+        if (line.startsWith('+')) {
+          // 추가된 라인만 매핑
+          mapping.set(positionInDiff, currentNewLine);
+        }
+        currentNewLine++;
+      }
+      // 삭제된 라인은 매핑하지 않음
+    }
+
+    return mapping;
   }
 
   /**
