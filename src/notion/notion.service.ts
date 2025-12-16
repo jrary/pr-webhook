@@ -7,8 +7,14 @@ export class NotionService {
   private notion: Client;
 
   constructor(private configService: ConfigService) {
+    const apiKey = this.configService.get<string>('NOTION_API_KEY');
+    if (!apiKey) {
+      throw new Error(
+        'NOTION_API_KEY is not set. Please set it in your .env file.',
+      );
+    }
     this.notion = new Client({
-      auth: this.configService.get<string>('NOTION_API_KEY'),
+      auth: apiKey,
     });
   }
 
@@ -20,6 +26,19 @@ export class NotionService {
 
   async getDatabase(databaseId: string) {
     const apiKey = this.configService.get<string>('NOTION_API_KEY');
+
+    if (!apiKey) {
+      throw new Error(
+        'NOTION_API_KEY is not set. Please set it in your .env file.',
+      );
+    }
+
+    if (!databaseId) {
+      throw new Error(
+        'Database ID is required. Please provide NOTION_DATABASE_ID in your .env file or as a parameter.',
+      );
+    }
+
     const response = await fetch(
       `https://api.notion.com/v1/databases/${databaseId}/query`,
       {
@@ -34,9 +53,28 @@ export class NotionService {
     );
 
     if (!response.ok) {
-      throw new Error(
-        `Failed to fetch database: ${response.status} ${await response.text()}`,
-      );
+      const errorText = await response.text();
+      let errorMessage = `Failed to fetch database: ${response.status} ${errorText}`;
+
+      if (response.status === 401) {
+        errorMessage =
+          `401 Unauthorized: Notion API 인증 실패\n\n` +
+          `가능한 원인:\n` +
+          `1. NOTION_API_KEY가 올바르지 않습니다. .env 파일을 확인하세요.\n` +
+          `2. Notion Integration이 데이터베이스에 접근 권한이 없습니다.\n` +
+          `   - Notion 워크스페이스에서 Integration을 데이터베이스에 연결했는지 확인하세요.\n` +
+          `   - 데이터베이스 페이지에서 "Connections" → Integration 추가\n\n` +
+          `에러 상세: ${errorText}`;
+      } else if (response.status === 404) {
+        errorMessage =
+          `404 Not Found: 데이터베이스를 찾을 수 없습니다.\n\n` +
+          `NOTION_DATABASE_ID가 올바른지 확인하세요.\n` +
+          `데이터베이스 ID는 URL에서 확인할 수 있습니다:\n` +
+          `https://www.notion.so/{workspace}/{database-id}?v=...\n\n` +
+          `에러 상세: ${errorText}`;
+      }
+
+      throw new Error(errorMessage);
     }
 
     const data = await response.json();

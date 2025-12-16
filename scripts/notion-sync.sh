@@ -30,6 +30,7 @@ show_help() {
     echo "  stats             - 저장된 데이터 통계 조회"
     echo "  list              - 저장된 페이지 목록 조회"
     echo "  full-sync         - 동기화 + 전체 업데이트 (전체 프로세스)"
+    echo "  test              - Notion API 연결 테스트"
     echo ""
     echo "Options:"
     echo "  --database-id     - Notion 데이터베이스 ID (기본값: 환경변수 NOTION_DATABASE_ID)"
@@ -42,6 +43,7 @@ show_help() {
     echo "  $0 update-page --page-id abc123"
     echo "  $0 update-pages --page-ids abc123,def456"
     echo "  $0 full-sync --database-id your-db-id"
+    echo "  $0 test --database-id your-db-id"
 }
 
 # API 호출 함수
@@ -210,6 +212,41 @@ list_pages() {
     fi
 }
 
+# 연결 테스트
+test_connection() {
+    local db_id=$1
+    local endpoint="/rag/admin/test-connection"
+    
+    if [ -n "$db_id" ]; then
+        endpoint="${endpoint}?databaseId=${db_id}"
+    fi
+    
+    echo -e "${BLUE}🔍 Notion API 연결 테스트 중...${NC}"
+    
+    response=$(call_api "GET" "$endpoint")
+    
+    if echo "$response" | grep -q '"success":true'; then
+        echo -e "${GREEN}✅ 모든 연결 테스트 성공!${NC}"
+        echo "$response" | jq '.'
+    else
+        echo -e "${YELLOW}⚠️  연결 테스트 결과:${NC}"
+        echo "$response" | jq '.'
+        
+        # 실패한 경우 도움말 표시
+        if echo "$response" | grep -q '"status":"error"'; then
+            echo ""
+            echo -e "${YELLOW}💡 문제 해결 방법:${NC}"
+            echo "1. .env 파일에 NOTION_API_KEY가 올바르게 설정되어 있는지 확인"
+            echo "2. .env 파일에 NOTION_DATABASE_ID가 올바르게 설정되어 있는지 확인"
+            echo "3. Notion Integration이 데이터베이스에 연결되어 있는지 확인:"
+            echo "   - Notion 데이터베이스 페이지 열기"
+            echo "   - 우측 상단 '...' 메뉴 → 'Connections' → Integration 추가"
+            echo "4. API 키가 올바른지 확인:"
+            echo "   https://www.notion.so/my-integrations 에서 확인"
+        fi
+    fi
+}
+
 # 전체 동기화 (동기화 + 업데이트)
 full_sync() {
     local db_id=$1
@@ -302,6 +339,9 @@ main() {
             ;;
         full-sync)
             full_sync "$db_id"
+            ;;
+        test)
+            test_connection "$db_id"
             ;;
         "")
             echo -e "${RED}❌ 명령어가 필요합니다${NC}"

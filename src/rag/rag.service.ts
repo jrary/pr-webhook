@@ -854,4 +854,97 @@ export class RagService {
       };
     }
   }
+
+  /**
+   * Notion API 연결 테스트
+   */
+  async testNotionConnection(databaseId?: string) {
+    try {
+      const targetDatabaseId =
+        databaseId || this.configService.get<string>('NOTION_DATABASE_ID');
+      const apiKey = this.configService.get<string>('NOTION_API_KEY');
+
+      const results: {
+        check: string;
+        status: 'success' | 'error';
+        message: string;
+      }[] = [];
+
+      // 1. API 키 확인
+      if (!apiKey) {
+        results.push({
+          check: 'NOTION_API_KEY',
+          status: 'error',
+          message:
+            'NOTION_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.',
+        });
+      } else {
+        results.push({
+          check: 'NOTION_API_KEY',
+          status: 'success',
+          message: `API 키가 설정되어 있습니다. (길이: ${apiKey.length}자)`,
+        });
+      }
+
+      // 2. 데이터베이스 ID 확인
+      if (!targetDatabaseId) {
+        results.push({
+          check: 'NOTION_DATABASE_ID',
+          status: 'error',
+          message:
+            'NOTION_DATABASE_ID가 설정되지 않았습니다. .env 파일을 확인하세요.',
+        });
+      } else {
+        results.push({
+          check: 'NOTION_DATABASE_ID',
+          status: 'success',
+          message: `데이터베이스 ID가 설정되어 있습니다: ${targetDatabaseId}`,
+        });
+      }
+
+      // 3. 실제 API 호출 테스트
+      if (apiKey && targetDatabaseId) {
+        try {
+          const pages = await this.notionService.getDatabase(targetDatabaseId);
+          results.push({
+            check: 'API 연결',
+            status: 'success',
+            message: `성공! ${pages.length}개의 페이지를 찾았습니다.`,
+          });
+        } catch (error) {
+          const errorMessage = (error as Error).message;
+          results.push({
+            check: 'API 연결',
+            status: 'error',
+            message: errorMessage,
+          });
+        }
+      } else {
+        results.push({
+          check: 'API 연결',
+          status: 'error',
+          message: 'API 키 또는 데이터베이스 ID가 없어 테스트를 건너뜁니다.',
+        });
+      }
+
+      const allSuccess = results.every((r) => r.status === 'success');
+
+      return {
+        success: allSuccess,
+        results,
+        message: allSuccess
+          ? '모든 연결 테스트가 성공했습니다!'
+          : '일부 연결 테스트가 실패했습니다. 위 결과를 확인하세요.',
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to test Notion connection: ${(error as Error).message}`,
+      );
+      return {
+        success: false,
+        error: (error as Error).message,
+        results: [],
+      };
+    }
+  }
 }

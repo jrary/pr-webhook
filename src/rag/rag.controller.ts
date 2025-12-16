@@ -134,4 +134,14 @@ export class RagController {
   async updateAll(@Body() body: IngestDto) {
     return await this.ragService.updateAllPages(body.databaseId);
   }
+
+  @Get('admin/test-connection')
+  @ApiOperation({
+    summary: '[관리자] Notion API 연결 테스트',
+    description: 'Notion API 키와 데이터베이스 접근 권한을 테스트합니다',
+  })
+  @ApiResponse({ status: 200, description: '연결 테스트 결과' })
+  async testConnection(@Query('databaseId') databaseId?: string) {
+    return await this.ragService.testNotionConnection(databaseId);
+  }
 }
