@@ -66,12 +66,32 @@ export class NotionService {
           `   - 데이터베이스 페이지에서 "Connections" → Integration 추가\n\n` +
           `에러 상세: ${errorText}`;
       } else if (response.status === 404) {
-        errorMessage =
-          `404 Not Found: 데이터베이스를 찾을 수 없습니다.\n\n` +
-          `NOTION_DATABASE_ID가 올바른지 확인하세요.\n` +
-          `데이터베이스 ID는 URL에서 확인할 수 있습니다:\n` +
-          `https://www.notion.so/{workspace}/{database-id}?v=...\n\n` +
-          `에러 상세: ${errorText}`;
+        // 에러 메시지에서 Integration 권한 문제인지 확인
+        const isPermissionError =
+          errorText.includes('shared with your integration') ||
+          errorText.includes('Make sure the relevant pages');
+
+        if (isPermissionError) {
+          errorMessage =
+            `404 Not Found: Notion Integration이 데이터베이스에 접근할 수 없습니다.\n\n` +
+            `해결 방법:\n` +
+            `1. Notion 데이터베이스 페이지를 엽니다\n` +
+            `2. 우측 상단의 "..." 메뉴를 클릭합니다\n` +
+            `3. "Connections" 또는 "연결"을 선택합니다\n` +
+            `4. 사용 중인 Integration을 추가합니다\n\n` +
+            `데이터베이스 ID: ${databaseId}\n` +
+            `Integration 확인: https://www.notion.so/my-integrations\n\n` +
+            `에러 상세: ${errorText}`;
+        } else {
+          errorMessage =
+            `404 Not Found: 데이터베이스를 찾을 수 없습니다.\n\n` +
+            `가능한 원인:\n` +
+            `1. NOTION_DATABASE_ID가 올바르지 않습니다.\n` +
+            `   - 데이터베이스 URL에서 ID 확인: https://www.notion.so/{workspace}/{database-id}?v=...\n` +
+            `   - URL의 database-id 부분을 복사하세요 (하이픈 포함)\n` +
+            `2. 데이터베이스가 삭제되었거나 이동되었을 수 있습니다.\n\n` +
+            `에러 상세: ${errorText}`;
+        }
       }
 
       throw new Error(errorMessage);

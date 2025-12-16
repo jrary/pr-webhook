@@ -274,6 +274,13 @@ full_sync() {
 
 # 메인 로직
 main() {
+    # 명령어가 없으면 도움말 표시
+    if [ $# -eq 0 ]; then
+        echo -e "${RED}❌ 명령어가 필요합니다${NC}"
+        show_help
+        exit 1
+    fi
+    
     local command=$1
     shift
     
@@ -285,18 +292,34 @@ main() {
     while [[ $# -gt 0 ]]; do
         case $1 in
             --database-id)
+                if [ -z "$2" ]; then
+                    echo -e "${RED}❌ --database-id 옵션에 값이 필요합니다${NC}"
+                    exit 1
+                fi
                 db_id="$2"
                 shift 2
                 ;;
             --page-id)
+                if [ -z "$2" ]; then
+                    echo -e "${RED}❌ --page-id 옵션에 값이 필요합니다${NC}"
+                    exit 1
+                fi
                 page_id="$2"
                 shift 2
                 ;;
             --page-ids)
+                if [ -z "$2" ]; then
+                    echo -e "${RED}❌ --page-ids 옵션에 값이 필요합니다${NC}"
+                    exit 1
+                fi
                 page_ids="$2"
                 shift 2
                 ;;
             --api-url)
+                if [ -z "$2" ]; then
+                    echo -e "${RED}❌ --api-url 옵션에 값이 필요합니다${NC}"
+                    exit 1
+                fi
                 API_URL="$2"
                 shift 2
                 ;;
@@ -342,11 +365,6 @@ main() {
             ;;
         test)
             test_connection "$db_id"
-            ;;
-        "")
-            echo -e "${RED}❌ 명령어가 필요합니다${NC}"
-            show_help
-            exit 1
             ;;
         *)
             echo -e "${RED}❌ 알 수 없는 명령어: $command${NC}"
