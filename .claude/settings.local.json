@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew:*)",
+      "Bash(find:*)",
+      "Bash(xargs ls:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(brew list:*)",
+      "Bash(/tmp/gradle-8.7/bin/gradle:*)"
+    ]
+  }
+}

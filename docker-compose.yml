@@ -1,28 +1,18 @@
-services:
-  qdrant:
-    image: qdrant/qdrant
-    ports:
-      - 6333:6333
-    volumes:
-      - ./qdrant_storage:/qdrant/storage
+version: '3.8'
 
-  mariadb:
-    image: mariadb:latest
-    container_name: rag-chat-mariadb
-    ports:
-      - "${DB_PORT:-3306}:3306"
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: webhook-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: ${DB_DATABASE:-rag_chat}
-      MYSQL_USER: ${DB_USERNAME:-root}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-rootpassword}
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: webhook_db
+      TZ: Asia/Seoul
+    ports:
+      - "3306:3306"
     volumes:
-      - mariadb_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - mysql-data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
 
 volumes:
-  mariadb_data:
+  mysql-data:

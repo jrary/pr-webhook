@@ -1,37 +1,9 @@
-# Build stage
-FROM node:18-alpine AS builder
+FROM eclipse-temurin:17-jre-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+COPY build/libs/*.jar app.jar
 
-# Install dependencies
-RUN npm ci
+EXPOSE 8080
 
-# Copy source code
-COPY . .
-
-# Build application
-RUN npm run build
-
-# Production stage
-FROM node:18-alpine
-
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install production dependencies only
-RUN npm ci --only=production
-
-# Copy built application from builder
-COPY --from=builder /app/dist ./dist
-
-# Expose port
-EXPOSE 3000
-
-# Start application
-CMD ["node", "dist/main"]
-
+ENTRYPOINT ["java", "-jar", "app.jar"]
