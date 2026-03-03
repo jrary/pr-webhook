@@ -6,7 +6,10 @@
       "Bash(xargs ls:*)",
       "Bash(git ls-tree:*)",
       "Bash(brew list:*)",
-      "Bash(/tmp/gradle-8.7/bin/gradle:*)"
+      "Bash(/tmp/gradle-8.7/bin/gradle:*)",
+      "WebFetch(domain:www.notion.so)",
+      "WebFetch(domain:tinted-bubbler-485.notion.site)",
+      "Bash(docker compose exec mysql mysql:*)"
     ]
   }
 }
