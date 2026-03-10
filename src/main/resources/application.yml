@@ -43,6 +43,14 @@ jwt:
   access-token-expiration: ${JWT_ACCESS_EXPIRATION:3600000}
   refresh-token-expiration: ${JWT_REFRESH_EXPIRATION:1209600000}
 
+claude:
+  api:
+    key: ${CLAUDE_API_KEY:}
+    url: ${CLAUDE_API_URL:https://api.anthropic.com/v1/messages}
+    model: ${CLAUDE_MODEL:claude-sonnet-4-20250514}
+    max-tokens: ${CLAUDE_MAX_TOKENS:4096}
+    timeout: ${CLAUDE_TIMEOUT:60}
+
 springdoc:
   swagger-ui:
     path: /swagger-ui.html

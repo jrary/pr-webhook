@@ -33,6 +33,20 @@ public enum BaseResponseStatus {
   INVALID_SIGNATURE(HttpStatus.UNAUTHORIZED, "웹훅 서명 검증에 실패했습니다."),
   DUPLICATE_DELIVERY(HttpStatus.OK, "이미 처리된 웹훅 이벤트입니다."),
 
+  // Rule (7000~)
+  RULE_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 규칙입니다."),
+  RULE_ALREADY_DELETED(HttpStatus.BAD_REQUEST, "이미 삭제된 규칙입니다."),
+  INVALID_RULE_DEFINITION(HttpStatus.BAD_REQUEST, "규칙 정의 JSON 형식이 올바르지 않습니다."),
+  INVALID_EVENT_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 이벤트 타입입니다."),
+  CODE_PATTERN_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 코드 패턴입니다."),
+  PATTERN_ANALYSIS_IN_PROGRESS(HttpStatus.CONFLICT, "패턴 분석이 진행 중입니다."),
+  NO_COMPLETED_PATTERN(HttpStatus.BAD_REQUEST, "완료된 패턴 분석이 없습니다."),
+
+  // Claude (8000~)
+  CLAUDE_API_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Claude API 호출에 실패했습니다."),
+  CLAUDE_API_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "Claude API 호출 시간이 초과되었습니다."),
+  CLAUDE_RESPONSE_PARSE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Claude API 응답 파싱에 실패했습니다."),
+
   // Server (9000~)
   INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
 
